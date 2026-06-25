@@ -579,6 +579,21 @@ async function quitAll() {
 document.getElementById('findBtn').addEventListener('click', startAddingCaps);
 document.getElementById('programBtn').addEventListener('click', goAction);
 document.getElementById('quitBtn').addEventListener('click', quitAll);
+document.getElementById('selectAll').addEventListener('click', e => { e.preventDefault(); caps.forEach(c => c.selected = true); renderCaps(); });
+document.getElementById('selectNone').addEventListener('click', e => { e.preventDefault(); caps.forEach(c => c.selected = false); renderCaps(); });
+
+document.querySelectorAll('.mode-btn').forEach(btn => btn.addEventListener('click', () => {
+  const level = Number(btn.dataset.level);
+  if (selectedLevel === level) {
+    // Tap again to deselect
+    selectedLevel = null;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('is-selected'));
+  } else {
+    selectedLevel = level;
+    document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('is-selected', b === btn));
+  }
+  updateControls();
+}));
 
 /* ── Firmware fetch ───────────────────────────────────────────────────── */
 function fwState(state, title, meta) {
