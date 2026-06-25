@@ -159,7 +159,7 @@
 
   <!-- ── PRESSURE MODE ─────────────────────────────────────────────────── -->
   <section>
-    <div class="section-label">Pressure mode</div>
+    <div class="section-label">Pressure mode <span style="font-size:11px;color:var(--ink-mute);text-transform:none;letter-spacing:0">(tap again to deselect)</span></div>
     <div class="mode-grid">
       <button class="mode-btn" data-level="1"><span class="mode-btn-name">Mode 1</span><span class="mode-btn-psi">2.0 PSI</span></button>
       <button class="mode-btn" data-level="2"><span class="mode-btn-name">Mode 2</span><span class="mode-btn-psi">2.5 PSI</span></button>
@@ -167,7 +167,7 @@
       <button class="mode-btn" data-level="4"><span class="mode-btn-name">Mode 4</span><span class="mode-btn-psi">3.5 PSI</span></button>
     </div>
     <div class="apply-row">
-      <button class="btn btn-primary btn-block" id="programBtn" disabled>Program</button>
+      <button class="btn btn-primary btn-block" id="programBtn" disabled>Go</button>
       <button class="btn btn-warn btn-block" id="quitBtn" disabled>Quit all</button>
     </div>
   </section>
@@ -195,44 +195,19 @@
       <button class="btn btn-ghost btn-sm" id="fw-refetchBtn" style="display:none">Refresh</button>
     </div>
 
-    <button class="btn btn-danger btn-block" id="flashBtn" disabled>
-      Flash selected caps
-    </button>
-    <p style="margin:8px 0 0;font-size:12px;color:var(--ink-mute);line-height:1.5">
-      Caps with outdated firmware are highlighted. After flashing, reconnect and set the pressure mode.
-    </p>
-
-    <div class="progress-wrap" id="o-progressWrap">
-      <div class="progress-bar"><div class="progress-fill" id="o-progressFill"></div></div>
-      <div class="progress-label" id="o-progressLabel"></div>
-    </div>
-    <div class="ota-log" id="o-log"></div>
     </div><!-- /otaBody -->
   </section>
 
 </main>
 <script>
 /* ===========================================================================
- * CSE Marine — Pressure Mode + Firmware Update
- *
- * FIRMWARE CONFIG
- * Point this at the .img file in the public GitHub repo.
- * Also commit a version.json alongside it:
- *   { "version": "3.2", "date": "2026-06-04" }
- * The page fetches version.json to know what version the .img is,
- * then compares against each cap's 'v' reply to decide if OTA is needed.
+ * CSE Marine — Pressure Mode + Firmware Update (OTA)
  * ========================================================================= */
-// Firmware config.
-// Commit your .img to the repo at the path below and it will be served
-// via raw.githubusercontent.com with correct CORS headers — no proxy needed.
-// Also commit a version.json at the same path for auto version detection.
-// Update FIRMWARE_PATH when you add a new firmware file to the repo.
+// Firmware config — update FIRMWARE_PATH when new firmware is added to the repo.
 const GITHUB_REPO    = 'gmiedema-cse/CSE-Marine';
 const FIRMWARE_PATH  = 'firmware/NS_application_OTA_v3.2.img';  // <-- update when new firmware is added
 const RAW_BASE       = `https://raw.githubusercontent.com/${GITHUB_REPO}/main`;
 const FIRMWARE_URL   = `${RAW_BASE}/${FIRMWARE_PATH}`;
-const VERSION_URL    = `${RAW_BASE}/firmware/version.json`;
-
 // Minimum acceptable firmware version. Caps below this get flagged for OTA.
 // Update this when new firmware is released.
 const REQUIRED_VERSION = '3.2';
@@ -254,7 +229,7 @@ if (!navigator.bluetooth) document.getElementById('unsupportedBanner').style.dis
 const caps = new Map();
 let selectedLevel = null;
 let otaImageBytes = null;
-let requiredVersion = REQUIRED_VERSION;  // default; version.json can override
+let requiredVersion = REQUIRED_VERSION;  // hardcoded — always 3.2
 let addingCaps = false;      // true while the multi-add loop is running
 let otaEnabled = true;       // toggled by the OTA switch
 let firmwareReady = false;   // true once HEAD check confirms file exists
@@ -498,55 +473,93 @@ function updateControls() {
   const findBtn = document.getElementById('findBtn');
   const programBtn = document.getElementById('programBtn');
   const quitBtn = document.getElementById('quitBtn');
-  const flashBtn = document.getElementById('flashBtn');
 
   findBtn.textContent = addingCaps ? 'Adding caps… (cancel in picker)' : '+ Add cap';
   findBtn.disabled = false;
-
-  programBtn.disabled = !(selConn > 0 && selectedLevel !== null);
   quitBtn.disabled = list.length === 0;
-  flashBtn.disabled = !otaEnabled || !(selConn > 0 && firmwareReady);
 
-  if (selectedLevel && selConn > 0) {
-    const m = MODE_LABELS[selectedLevel];
-    programBtn.textContent = `Program ${m.name} to ${selConn} cap${selConn === 1 ? '' : 's'}`;
-  } else {
-    programBtn.textContent = 'Program';
+  // Go button is enabled when we have connected caps selected AND at least one action to do
+  const hasMode = selectedLevel !== null;
+  const hasOta  = otaEnabled && firmwareReady && selNeedsUpdate > 0;
+  programBtn.disabled = !(selConn > 0 && (hasMode || hasOta));
+
+  if (!selConn) {
+    programBtn.textContent = 'Go';
+    return;
   }
 
-  if (selNeedsUpdate > 0 && otaImageBytes) {
-    flashBtn.textContent = `Flash ${selNeedsUpdate} cap${selNeedsUpdate === 1 ? '' : 's'} with outdated firmware`;
-  } else if (selConn > 0 && firmwareReady) {
-    flashBtn.textContent = 'Flash selected caps';
-    flashBtn.disabled = !otaEnabled;
-  } else {
-    flashBtn.textContent = 'Flash selected caps';
-  }
+  // Build a descriptive label
+  const parts = [];
+  if (hasMode) parts.push(`program ${MODE_LABELS[selectedLevel].name}`);
+  if (hasOta)  parts.push(`OTA ${selNeedsUpdate} cap${selNeedsUpdate===1?'':'s'}`);
+  if (!parts.length && otaEnabled && firmwareReady) parts.push('no OTA needed');
+
+  programBtn.textContent = parts.length
+    ? `Go — ${parts.join(' + ')}`
+    : 'Go';
 }
 
-/* ── Pressure mode ────────────────────────────────────────────────────── */
-async function programSelected() {
-  if (!selectedLevel) return;
+/* ── Go action ─────────────────────────────────────────────────────────────────────── */
+// Single entry point. Behaviour:
+//   mode + OTA on  -> program mode then flash outdated caps
+//   mode + OTA off -> program mode only
+//   no mode + OTA  -> flash outdated caps only
+async function goAction() {
   const sel = Array.from(caps.values()).filter(c => c.selected && c.rx);
   if (!sel.length) return;
-  const m = MODE_LABELS[selectedLevel];
+
+  const doMode = selectedLevel !== null;
+  const doOta  = otaEnabled && firmwareReady && sel.some(c => c.needsUpdate);
+  if (!doMode && !doOta) return;
 
   document.getElementById('findBtn').disabled = true;
   document.getElementById('programBtn').disabled = true;
   document.getElementById('quitBtn').disabled = true;
   document.querySelectorAll('.mode-btn').forEach(b => b.disabled = true);
 
-  sel.forEach(c => { c.status = `programming ${m.name}…`; c.tone = 'working'; });
-  renderCaps();
+  // Step 1: program pressure mode
+  if (doMode) {
+    const m = MODE_LABELS[selectedLevel];
+    const payload = new Uint8Array([0x70, 0x30 + selectedLevel]);
+    sel.forEach(c => { c.status = `programming ${m.name}…`; c.tone = 'working'; });
+    renderCaps();
+    await Promise.all(sel.map(async cap => {
+      const ack = await sendAndWait(cap, payload, 3000);
+      if (!ack)              { cap.status = 'no reply';         cap.tone = 'warn'; }
+      else if (ack[0]===0x50){ cap.status = `${m.name} (${m.psi} PSI)`; cap.tone = 'good'; }
+      else if (ack[0]===0x45){ cap.status = 'rejected';         cap.tone = 'warn'; }
+      else                   { cap.status = 'unexpected reply'; cap.tone = 'warn'; }
+    }));
+    renderCaps();
+  }
 
-  const payload = new Uint8Array([0x70, 0x30 + selectedLevel]);
-  await Promise.all(sel.map(async cap => {
-    const ack = await sendAndWait(cap, payload, 3000);
-    if (!ack)              { cap.status = 'no reply';          cap.tone = 'warn'; }
-    else if (ack[0]===0x50){ cap.status = `${m.name} (${m.psi} PSI)`; cap.tone = 'good'; }
-    else if (ack[0]===0x45){ cap.status = 'rejected';          cap.tone = 'warn'; }
-    else                   { cap.status = 'unexpected reply';  cap.tone = 'warn'; }
-  }));
+  // Step 2: OTA caps that need it
+  if (doOta) {
+    if (!otaImageBytes) {
+      const ok = await downloadFirmware();
+      if (!ok) {
+        document.getElementById('findBtn').disabled = false;
+        document.querySelectorAll('.mode-btn').forEach(b => b.disabled = false);
+        updateControls(); return;
+      }
+    }
+    const otaSel = sel.filter(c => c.needsUpdate && c.rx);
+    await Promise.all(otaSel.map(async cap => {
+      cap.status = 'OTA: priming…'; cap.tone = 'working'; renderCaps();
+      try {
+        await sendAndWait(cap, new Uint8Array([0x62]), 1500);
+        cap.status = 'OTA: triggering…'; cap.tone = 'working'; renderCaps();
+        try { await bleWrite(cap.rx, new Uint8Array([0x4F])); } catch(e){}
+        cap.status = 'OTA: bootloader…'; cap.tone = 'working'; renderCaps();
+        await new Promise(r => setTimeout(r, 1500));
+        cap.status = 'OTA: flashing…'; cap.tone = 'working'; renderCaps();
+        await runMdfu(cap, otaImageBytes, pct => { cap.status = `OTA: ${pct}%`; renderCaps(); });
+        await removeCap(cap.id);
+      } catch(err) {
+        cap.status = `OTA failed: ${err.message.slice(0,40)}`; cap.tone = 'danger'; renderCaps();
+      }
+    }));
+  }
 
   document.getElementById('findBtn').disabled = false;
   document.querySelectorAll('.mode-btn').forEach(b => b.disabled = false);
@@ -562,247 +575,10 @@ async function quitAll() {
   document.getElementById('findBtn').disabled = false;
 }
 
-/* ── Button wiring ────────────────────────────────────────────────────── */
+/* ── Button wiring ─────────────────────────────────────────────────────────────────────── */
 document.getElementById('findBtn').addEventListener('click', startAddingCaps);
-document.getElementById('programBtn').addEventListener('click', programSelected);
+document.getElementById('programBtn').addEventListener('click', goAction);
 document.getElementById('quitBtn').addEventListener('click', quitAll);
-document.getElementById('selectAll').addEventListener('click', e => { e.preventDefault(); caps.forEach(c => c.selected = true); renderCaps(); });
-document.getElementById('selectNone').addEventListener('click', e => { e.preventDefault(); caps.forEach(c => c.selected = false); renderCaps(); });
-document.querySelectorAll('.mode-btn').forEach(btn => btn.addEventListener('click', () => {
-  selectedLevel = Number(btn.dataset.level);
-  document.querySelectorAll('.mode-btn').forEach(b => b.classList.toggle('is-selected', b === btn));
-  updateControls();
-}));
-
-/* ══════════════════════════════════════════════════════════════════════════
- * FIRMWARE FETCH
- * ══════════════════════════════════════════════════════════════════════════ */
-function fwState(state, title, meta) {
-  const card = document.getElementById('fw-card');
-  const icon = document.getElementById('fw-icon');
-  const titleEl = document.getElementById('fw-title');
-  const metaEl = document.getElementById('fw-meta');
-  const refetch = document.getElementById('fw-refetchBtn');
-  card.className = 'fw-card' + (state ? ' is-' + state : '');
-  icon.textContent = {good:'✅', error:'❌', loading:'⏳'}[state] ?? '📦';
-  titleEl.textContent = title;
-  metaEl.textContent = meta || '';
-  refetch.style.display = (state === 'error' || state === 'good') ? '' : 'none';
-}
-
-async function fetchFirmware() {
-  fwState('loading', 'Checking firmware…', '');
-  otaImageBytes = null;
-  updateControls();
-  try {
-    // Just do a HEAD request first to confirm the file exists and get its size.
-    // The actual binary is downloaded lazily when Flash is tapped.
-    const head = await fetch(FIRMWARE_URL, { method: 'HEAD' });
-    if (!head.ok) {
-      if (head.status === 404) {
-        fwState('error', 'Firmware file not found',
-          `Commit the .img to: ${FIRMWARE_PATH} on the main branch`);
-      } else {
-        fwState('error', `Fetch failed (HTTP ${head.status})`, FIRMWARE_URL);
-      }
-      return;
-    }
-
-    // Try version.json
-    try {
-      const vRes = await fetch(VERSION_URL);
-      if (vRes.ok) {
-        const vJson = await vRes.json();
-        if (vJson.version) requiredVersion = vJson.version;
-      }
-    } catch(e) { /* optional */ }
-
-    const bytes = parseInt(head.headers.get('content-length') || '0');
-    const sizeStr = bytes ? `  (${(bytes / 1024).toFixed(1)} KB)` : '';
-    const filename = FIRMWARE_PATH.split('/').pop();
-    const verStr = requiredVersion ? `  v${requiredVersion}` : '';
-    fwState('good',
-      `${filename}${verStr}${sizeStr}`,
-      `Ready to download — will fetch when flashing`
-    );
-    firmwareReady = true;
-    updateControls();
-  } catch(err) {
-    fwState('error', 'Firmware check failed', err.message);
-  }
-}
-
-async function downloadFirmware() {
-  fwState('loading', 'Downloading firmware…', '');
-  try {
-    const res = await fetch(FIRMWARE_URL);
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    otaImageBytes = new Uint8Array(await res.arrayBuffer());
-    const filename = FIRMWARE_PATH.split('/').pop();
-    const verStr = requiredVersion ? `  v${requiredVersion}` : '';
-    fwState('good',
-      `${filename}${verStr}  (${(otaImageBytes.length / 1024).toFixed(1)} KB)`,
-      `Downloaded ${new Date().toLocaleTimeString()}`
-    );
-    return true;
-  } catch(err) {
-    fwState('error', 'Download failed', err.message);
-    return false;
-  }
-}
-document.getElementById('fw-refetchBtn').addEventListener('click', () => {
-  otaImageBytes = null;
-  firmwareReady = false;
-  fetchFirmware();
-});
-
-/* ══════════════════════════════════════════════════════════════════════════
- * MDFU PROTOCOL
- * ══════════════════════════════════════════════════════════════════════════ */
-const MDFU = {
-  FRAME_START:0x56, FRAME_END:0x9E, ESCAPE:0xCC,
-  CMD:{GET_CLIENT_INFO:1,START_TRANSFER:2,WRITE_CHUNK:3,GET_IMAGE_STATE:4,END_TRANSFER:5},
-  STATUS:{SUCCESS:1},
-  checksum(d){let s=0;const p=(d.length%2)?new Uint8Array([...d,0]):d;for(let i=0;i<p.length;i+=2)s+=(p[i+1]<<8)|p[i];return(~s)&0xffff;},
-  escape(d){const o=[];for(const b of d){if(b===0x56)o.push(0xCC,0xA9);else if(b===0x9E)o.push(0xCC,0x61);else if(b===0xCC)o.push(0xCC,0x33);else o.push(b);}return new Uint8Array(o);},
-  unescape(d){const o=[];let e=false;for(const b of d){if(e){if(b===0xA9)o.push(0x56);else if(b===0x61)o.push(0x9E);else if(b===0x33)o.push(0xCC);e=false;}else if(b===0xCC)e=true;else o.push(b);}return new Uint8Array(o);},
-  buildFrame(p){const c=this.checksum(p);const pl=new Uint8Array([...p,c&0xff,(c>>8)&0xff]);return new Uint8Array([this.FRAME_START,...this.escape(pl),this.FRAME_END]);},
-  parseFrame(f){const pl=this.unescape(f.slice(1,-1));const d=pl.slice(0,-2);const rc=pl[pl.length-2]|(pl[pl.length-1]<<8);if(rc!==this.checksum(d))throw new Error('CRC mismatch');return d;},
-  buildCmd(seq,cmd,data=new Uint8Array(),sync=false){return new Uint8Array([seq|(sync?0x80:0),cmd,...data]);},
-  parseStatus(b){return{seq:b[0]&0x1f,resend:!!(b[0]&0x40),status:b[1],data:b.slice(2)};},
-};
-
-class FrameReceiver {
-  constructor(){this._buf=[];this._res=null;this._rej=null;this._t=null;}
-  feed(bytes){for(const b of bytes)this._buf.push(b);this._try();}
-  next(ms=8000){return new Promise((res,rej)=>{this._res=res;this._rej=rej;this._t=setTimeout(()=>{this._res=null;this._rej=null;rej(new Error('Frame timeout'));},ms);this._try();});}
-  _try(){if(!this._res)return;const s=this._buf.indexOf(MDFU.FRAME_START);if(s===-1)return;for(let i=s+1;i<this._buf.length;i++){if(this._buf[i]===MDFU.FRAME_END&&this._buf[i-1]!==MDFU.ESCAPE){const f=new Uint8Array(this._buf.splice(0,i+1));clearTimeout(this._t);const r=this._res;this._res=null;this._rej=null;r(f);return;}}}
-  reset(){this._buf=[];}
-}
-
-/* ── OTA log/progress ─────────────────────────────────────────────────── */
-const logEl = document.getElementById('o-log');
-const progWrap = document.getElementById('o-progressWrap');
-const progFill = document.getElementById('o-progressFill');
-const progLabel = document.getElementById('o-progressLabel');
-
-function oLog(msg,cls=''){logEl.classList.add('is-visible');const p=document.createElement('p');if(cls)p.className=cls;p.textContent=msg;logEl.appendChild(p);logEl.scrollTop=logEl.scrollHeight;}
-function oClearLog(){logEl.innerHTML='';logEl.classList.remove('is-visible');}
-function oProgress(pct,label,cls=''){progWrap.classList.add('is-visible');progFill.classList.remove('ind');progFill.style.width=pct+'%';progLabel.textContent=label;progLabel.className='progress-label'+(cls?' '+cls:'');}
-function oProgressInd(label){progWrap.classList.add('is-visible');progFill.classList.add('ind');progFill.style.width='';progLabel.textContent=label;progLabel.className='progress-label';}
-
-/* ── MDFU session ─────────────────────────────────────────────────────── */
-async function runMdfu(cap, imageBytes, onProgress) {
-  const receiver = new FrameReceiver();
-  const nh = e => { const v=e.target.value; receiver.feed(new Uint8Array(v.buffer,v.byteOffset,v.byteLength)); };
-  cap.tx.addEventListener('characteristicvaluechanged', nh);
-  let seq = 0;
-  const RETRIES = 5;
-
-  async function sendCmd(cmd, data=new Uint8Array(), sync=false, ms=10000) {
-    for (let attempt = 0; attempt <= RETRIES; attempt++) {
-      const frame = MDFU.buildFrame(MDFU.buildCmd(seq, cmd, data, sync));
-      for (let off = 0; off < frame.length; off += 20) await bleWrite(cap.rx, frame.slice(off, off+20));
-      let sp;
-      try { const sf = await receiver.next(ms); sp = MDFU.parseStatus(MDFU.parseFrame(sf)); }
-      catch(e) { if (attempt < RETRIES) { oLog(`  retry ${attempt+1}: ${e.message}`, 'lm'); continue; } throw e; }
-      if (sp.resend) { if (attempt < RETRIES) continue; throw new Error('Too many resends'); }
-      if (sp.status !== MDFU.STATUS.SUCCESS) throw new Error(`MDFU error ${sp.status}`);
-      seq = (seq+1) & 0x1f; return sp;
-    }
-  }
-
-  try {
-    oLog(`[${cap.name}] GET_CLIENT_INFO…`);
-    const info = await sendCmd(MDFU.CMD.GET_CLIENT_INFO, new Uint8Array(), true, 5000);
-    let bufSize = 64;
-    for (let i=0; i<info.data.length;) { const t=info.data[i],l=info.data[i+1]; if(t===2&&l>=2) bufSize=info.data[i+2]|(info.data[i+3]<<8); i+=2+l; }
-    oLog(`  buffer size: ${bufSize} B`, 'lm');
-
-    oLog(`[${cap.name}] START_TRANSFER…`);
-    await sendCmd(MDFU.CMD.START_TRANSFER, new Uint8Array(), false, 5000);
-
-    const total = Math.ceil(imageBytes.length / bufSize);
-    oLog(`[${cap.name}] writing ${total} chunks…`);
-    for (let i=0; i<imageBytes.length; i+=bufSize) {
-      await sendCmd(MDFU.CMD.WRITE_CHUNK, imageBytes.slice(i, i+bufSize), false, 15000);
-      onProgress(Math.min(Math.round(((i+bufSize)/imageBytes.length)*100), 99));
-    }
-
-    oLog(`[${cap.name}] GET_IMAGE_STATE…`);
-    const state = await sendCmd(MDFU.CMD.GET_IMAGE_STATE, new Uint8Array(), false, 10000);
-    if (state.data[0] !== 1) throw new Error(`Image invalid (state=${state.data[0]})`);
-    oLog(`[${cap.name}] image VALID`, 'lg');
-
-    oLog(`[${cap.name}] END_TRANSFER…`);
-    await sendCmd(MDFU.CMD.END_TRANSFER, new Uint8Array(), false, 10000);
-    onProgress(100);
-    oLog(`[${cap.name}] Flash complete.`, 'lg');
-  } finally {
-    cap.tx.removeEventListener('characteristicvaluechanged', nh);
-  }
-}
-
-/* ── Flash selected caps (supports multiple simultaneously) ───────────── */
-async function doFlash() {
-  const sel = Array.from(caps.values()).filter(c => c.selected && c.rx);
-  if (!sel.length) return;
-
-  // Download firmware now if not already in memory
-  if (!otaImageBytes) {
-    const ok = await downloadFirmware();
-    if (!ok) return;
-  }
-
-  document.getElementById('findBtn').disabled = true;
-  document.getElementById('flashBtn').disabled = true;
-  document.getElementById('programBtn').disabled = true;
-  oClearLog();
-  oProgressInd(`Flashing ${sel.length} cap${sel.length===1?'':'s'}…`);
-
-  // Flash all selected caps in parallel
-  let completed = 0;
-  await Promise.all(sel.map(async cap => {
-    oLog(`\n[${cap.name}] Starting OTA…`);
-    cap.status = 'OTA: priming…'; cap.tone = 'working'; renderCaps();
-    try {
-      // Primer
-      await sendAndWait(cap, new Uint8Array([0x62]), 1500);
-      // OTA trigger
-      cap.status = 'OTA: triggering bootloader…'; cap.tone = 'working'; renderCaps();
-      oLog(`[${cap.name}] Triggering bootloader…`);
-      try { await bleWrite(cap.rx, new Uint8Array([0x4F])); } catch(e){}
-
-      cap.status = 'OTA: bootloader starting…'; cap.tone = 'working'; renderCaps();
-      await new Promise(r => setTimeout(r, 1500));
-
-      cap.status = 'OTA: flashing…'; cap.tone = 'working'; renderCaps();
-      await runMdfu(cap, otaImageBytes, pct => {
-        cap.status = `OTA: ${pct}%`; renderCaps();
-        // Overall progress = average across all caps
-        completed = Array.from(caps.values()).reduce((acc, c) => {
-          const m = c.status.match(/OTA: (\d+)%/);
-          return acc + (m ? Number(m[1]) : c.status === 'OTA: flashing done' ? 100 : 0);
-        }, 0);
-        oProgress(Math.round(completed / sel.length), `Flashing ${sel.length} cap${sel.length===1?'':'s'}…`);
-      });
-
-      // Done — remove from list
-      oLog(`[${cap.name}] Done. Removing from list.`, 'lg');
-      await removeCap(cap.id);
-
-    } catch(err) {
-      oLog(`[${cap.name}] FAILED: ${err.message}`, 'le');
-      cap.status = 'OTA failed'; cap.tone = 'danger'; renderCaps();
-    }
-  }));
-
-  oProgress(100, 'Flash complete. Reconnect caps to set pressure mode.', 'good');
-  document.getElementById('findBtn').disabled = false;
-  updateControls();
-}
-
-document.getElementById('flashBtn').addEventListener('click', doFlash);
 
 /* ── Init ─────────────────────────────────────────────────────────────── */
 document.getElementById('otaToggle').addEventListener('change', function() {
