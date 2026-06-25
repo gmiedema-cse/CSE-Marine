@@ -257,6 +257,7 @@ let otaImageBytes = null;
 let requiredVersion = REQUIRED_VERSION;  // default; version.json can override
 let addingCaps = false;      // true while the multi-add loop is running
 let otaEnabled = true;       // toggled by the OTA switch
+let firmwareReady = false;   // true once HEAD check confirms file exists
 
 /* ── BLE write helper ─────────────────────────────────────────────────── */
 async function bleWrite(char, bytes) {
@@ -471,7 +472,12 @@ function renderCaps() {
   capListEl.querySelectorAll('.cap-checkbox').forEach(cb =>
     cb.addEventListener('change', () => {
       const c = caps.get(cb.dataset.id);
-      if (c) { c.selected = cb.checked; renderCaps(); }
+      if (c) {
+          c.selected = cb.checked;
+          // Blink LEDs when selected so the operator can identify which cap they picked
+          if (cb.checked && c.rx) bleWrite(c.rx, new Uint8Array([0x62])).catch(()=>{});
+          renderCaps();
+        }
     }));
   capListEl.querySelectorAll('.btn-identify').forEach(btn =>
     btn.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); identifyCap(btn.dataset.id); }));
@@ -499,7 +505,7 @@ function updateControls() {
 
   programBtn.disabled = !(selConn > 0 && selectedLevel !== null);
   quitBtn.disabled = list.length === 0;
-  flashBtn.disabled = !otaEnabled || !(selConn > 0 && otaImageBytes);
+  flashBtn.disabled = !otaEnabled || !(selConn > 0 && firmwareReady);
 
   if (selectedLevel && selConn > 0) {
     const m = MODE_LABELS[selectedLevel];
@@ -510,9 +516,9 @@ function updateControls() {
 
   if (selNeedsUpdate > 0 && otaImageBytes) {
     flashBtn.textContent = `Flash ${selNeedsUpdate} cap${selNeedsUpdate === 1 ? '' : 's'} with outdated firmware`;
-  } else if (selConn > 0 && otaImageBytes) {
+  } else if (selConn > 0 && firmwareReady) {
     flashBtn.textContent = 'Flash selected caps';
-    flashBtn.disabled = false;  // allow manual flash even if up to date
+    flashBtn.disabled = !otaEnabled;
   } else {
     flashBtn.textContent = 'Flash selected caps';
   }
@@ -585,54 +591,70 @@ function fwState(state, title, meta) {
 }
 
 async function fetchFirmware() {
-  fwState('loading', 'Fetching firmware…', '');
+  fwState('loading', 'Checking firmware…', '');
+  otaImageBytes = null;
+  updateControls();
   try {
-    // Try to load version.json first (optional — fine if it doesn't exist yet)
+    // Just do a HEAD request first to confirm the file exists and get its size.
+    // The actual binary is downloaded lazily when Flash is tapped.
+    const head = await fetch(FIRMWARE_URL, { method: 'HEAD' });
+    if (!head.ok) {
+      if (head.status === 404) {
+        fwState('error', 'Firmware file not found',
+          `Commit the .img to: ${FIRMWARE_PATH} on the main branch`);
+      } else {
+        fwState('error', `Fetch failed (HTTP ${head.status})`, FIRMWARE_URL);
+      }
+      return;
+    }
+
+    // Try version.json
     try {
       const vRes = await fetch(VERSION_URL);
       if (vRes.ok) {
         const vJson = await vRes.json();
         if (vJson.version) requiredVersion = vJson.version;
       }
-    } catch(e) { /* version.json is optional */ }
+    } catch(e) { /* optional */ }
 
-    // Fetch the firmware binary directly from the repo.
-    // raw.githubusercontent.com serves files from public repos with correct
-    // CORS headers — no proxy, no auth, no redirects to S3.
+    const bytes = parseInt(head.headers.get('content-length') || '0');
+    const sizeStr = bytes ? `  (${(bytes / 1024).toFixed(1)} KB)` : '';
+    const filename = FIRMWARE_PATH.split('/').pop();
+    const verStr = requiredVersion ? `  v${requiredVersion}` : '';
+    fwState('good',
+      `${filename}${verStr}${sizeStr}`,
+      `Ready to download — will fetch when flashing`
+    );
+    firmwareReady = true;
+    updateControls();
+  } catch(err) {
+    fwState('error', 'Firmware check failed', err.message);
+  }
+}
+
+async function downloadFirmware() {
+  fwState('loading', 'Downloading firmware…', '');
+  try {
     const res = await fetch(FIRMWARE_URL);
-    if (!res.ok) {
-      if (res.status === 404) {
-        fwState('error',
-          'Firmware file not found',
-          `Commit the .img to: ${FIRMWARE_PATH} on the main branch`);
-      } else {
-        fwState('error', `Fetch failed (HTTP ${res.status})`, FIRMWARE_URL);
-      }
-      return;
-    }
-
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     otaImageBytes = new Uint8Array(await res.arrayBuffer());
     const filename = FIRMWARE_PATH.split('/').pop();
     const verStr = requiredVersion ? `  v${requiredVersion}` : '';
     fwState('good',
       `${filename}${verStr}  (${(otaImageBytes.length / 1024).toFixed(1)} KB)`,
-      `Fetched ${new Date().toLocaleTimeString()}`
+      `Downloaded ${new Date().toLocaleTimeString()}`
     );
-
-    // Re-evaluate any already-connected caps
-    caps.forEach(cap => {
-      if (cap.version !== null) {
-        cap.needsUpdate = versionNeedsUpdate(cap.version, requiredVersion);
-        if (cap.needsUpdate) { cap.status = `v${cap.version} — update to v${requiredVersion} required`; cap.tone = 'update'; }
-        else { cap.status = `v${cap.version}` + (cap.versionDate ? ` (${cap.versionDate})` : '') + ' — up to date'; cap.tone = 'good'; }
-      }
-    });
-    renderCaps(); updateControls();
+    return true;
   } catch(err) {
-    fwState('error', 'Firmware fetch failed', err.message);
+    fwState('error', 'Download failed', err.message);
+    return false;
   }
 }
-document.getElementById('fw-refetchBtn').addEventListener('click', fetchFirmware);
+document.getElementById('fw-refetchBtn').addEventListener('click', () => {
+  otaImageBytes = null;
+  firmwareReady = false;
+  fetchFirmware();
+});
 
 /* ══════════════════════════════════════════════════════════════════════════
  * MDFU PROTOCOL
@@ -723,9 +745,14 @@ async function runMdfu(cap, imageBytes, onProgress) {
 
 /* ── Flash selected caps (supports multiple simultaneously) ───────────── */
 async function doFlash() {
-  if (!otaImageBytes) return;
   const sel = Array.from(caps.values()).filter(c => c.selected && c.rx);
   if (!sel.length) return;
+
+  // Download firmware now if not already in memory
+  if (!otaImageBytes) {
+    const ok = await downloadFirmware();
+    if (!ok) return;
+  }
 
   document.getElementById('findBtn').disabled = true;
   document.getElementById('flashBtn').disabled = true;
