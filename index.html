@@ -222,11 +222,16 @@
  * The page fetches version.json to know what version the .img is,
  * then compares against each cap's 'v' reply to decide if OTA is needed.
  * ========================================================================= */
-// Firmware is fetched from the latest GitHub Release on this repo.
-// Just cut a new release and attach the .img — no code changes needed.
-// The release body (or a release asset named version.json) can optionally
-// carry { "version": "3.2" } to set requiredVersion automatically.
-const GITHUB_REPO = 'gmiedema-cse/CSE-Marine';
+// Firmware config.
+// Commit your .img to the repo at the path below and it will be served
+// via raw.githubusercontent.com with correct CORS headers — no proxy needed.
+// Also commit a version.json at the same path for auto version detection.
+// Update FIRMWARE_PATH when you add a new firmware file to the repo.
+const GITHUB_REPO    = 'gmiedema-cse/CSE-Marine';
+const FIRMWARE_PATH  = 'firmware/NS_application_OTA_v3.2.img';  // <-- update when new firmware is added
+const RAW_BASE       = `https://raw.githubusercontent.com/${GITHUB_REPO}/main`;
+const FIRMWARE_URL   = `${RAW_BASE}/${FIRMWARE_PATH}`;
+const VERSION_URL    = `${RAW_BASE}/firmware/version.json`;
 
 // Minimum acceptable firmware version. Caps below this get flagged for OTA.
 // Update this when new firmware is released.
@@ -580,87 +585,41 @@ function fwState(state, title, meta) {
 }
 
 async function fetchFirmware() {
-  fwState('loading', 'Checking latest release…', '');
+  fwState('loading', 'Fetching firmware…', '');
   try {
-    // Step 1: Releases API — public repo, no auth needed, no CORS issues
-    const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`;
-    const apiRes = await fetch(apiUrl, { headers: { Accept: 'application/vnd.github+json' } });
-    if (!apiRes.ok) {
-      const msg = apiRes.status === 404
-        ? 'No releases found — create a GitHub Release and attach the .img file.'
-        : `GitHub API error ${apiRes.status}`;
-      fwState('error', msg, apiUrl); return;
-    }
-    const release = await apiRes.json();
-    const tag = release.tag_name || release.name || '(unnamed)';
+    // Try to load version.json first (optional — fine if it doesn't exist yet)
+    try {
+      const vRes = await fetch(VERSION_URL);
+      if (vRes.ok) {
+        const vJson = await vRes.json();
+        if (vJson.version) requiredVersion = vJson.version;
+      }
+    } catch(e) { /* version.json is optional */ }
 
-    // Step 2: find the .img asset
-    const assets = release.assets || [];
-    const asset = assets.find(a => a.name.endsWith('.img'));
-    if (!asset) {
-      fwState('error', `No .img found in release ${tag}`,
-        `Assets: ${assets.map(a => a.name).join(', ') || 'none'}`); return;
-    }
-
-    // Step 3: check for version.json asset to get the version string
-    const versionAsset = assets.find(a => a.name === 'version.json');
-    if (versionAsset) {
-      try {
-        const vApiUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${versionAsset.id}`;
-        let vRes = await fetch(vApiUrl, { headers: { Accept: 'application/octet-stream' } });
-        if (!vRes.ok) vRes = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(versionAsset.browser_download_url)}`);
-        if (vRes.ok) {
-          const vJson = await vRes.json();
-          if (vJson.version) requiredVersion = vJson.version;
-        }
-      } catch(e) { /* version.json optional */ }
-    } else {
-      // Fall back to parsing version from the tag name (e.g. "v3.2" -> "3.2")
-      const tagVersion = tag.replace(/^v/i, '');
-      if (/^\d+\.\d+/.test(tagVersion)) requiredVersion = tagVersion;
+    // Fetch the firmware binary directly from the repo.
+    // raw.githubusercontent.com serves files from public repos with correct
+    // CORS headers — no proxy, no auth, no redirects to S3.
+    const res = await fetch(FIRMWARE_URL);
+    if (!res.ok) {
+      if (res.status === 404) {
+        fwState('error',
+          'Firmware file not found',
+          `Commit the .img to: ${FIRMWARE_PATH} on the main branch`);
+      } else {
+        fwState('error', `Fetch failed (HTTP ${res.status})`, FIRMWARE_URL);
+      }
+      return;
     }
 
-    fwState('loading', `Downloading ${asset.name}…`,
-      `Release ${tag} · ${(asset.size / 1024).toFixed(1)} KB`);
-
-    // Step 4: download the asset via the GitHub API using the asset ID.
-    // For public repos, fetching the API asset URL with Accept:
-    // application/octet-stream redirects to the CDN and works without
-    // a token. We try this first, then fall back to two CORS proxies.
-    const apiAssetUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${asset.id}`;
-    let dlRes = null;
-    const attempts = [
-      // Attempt 1: GitHub API asset endpoint (works for public repos, no proxy)
-      () => fetch(apiAssetUrl, {
-        headers: {
-          Accept: 'application/octet-stream',
-          'X-Requested-With': 'XMLHttpRequest',
-        }
-      }),
-      // Attempt 2: corsproxy.io
-      () => fetch(`https://corsproxy.io/?url=${encodeURIComponent(asset.browser_download_url)}`),
-      // Attempt 3: allorigins.win
-      () => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(asset.browser_download_url)}`),
-    ];
-
-    let lastErr = '';
-    for (const attempt of attempts) {
-      try {
-        const res = await attempt();
-        if (res.ok) { dlRes = res; break; }
-        lastErr = `HTTP ${res.status}`;
-      } catch(e) { lastErr = e.message; }
-    }
-    if (!dlRes) throw new Error(`All download attempts failed. Last error: ${lastErr}`);
-
-    otaImageBytes = new Uint8Array(await dlRes.arrayBuffer());
+    otaImageBytes = new Uint8Array(await res.arrayBuffer());
+    const filename = FIRMWARE_PATH.split('/').pop();
     const verStr = requiredVersion ? `  v${requiredVersion}` : '';
     fwState('good',
-      `${asset.name}${verStr}  (${(otaImageBytes.length / 1024).toFixed(1)} KB)`,
-      `Release ${tag} · fetched ${new Date().toLocaleTimeString()}`
+      `${filename}${verStr}  (${(otaImageBytes.length / 1024).toFixed(1)} KB)`,
+      `Fetched ${new Date().toLocaleTimeString()}`
     );
 
-    // Re-evaluate connected caps now we know the required version
+    // Re-evaluate any already-connected caps
     caps.forEach(cap => {
       if (cap.version !== null) {
         cap.needsUpdate = versionNeedsUpdate(cap.version, requiredVersion);
