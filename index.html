@@ -606,8 +606,9 @@ async function fetchFirmware() {
     const versionAsset = assets.find(a => a.name === 'version.json');
     if (versionAsset) {
       try {
-        const vProxy = `https://corsproxy.io/?url=${encodeURIComponent(versionAsset.browser_download_url)}`;
-        const vRes = await fetch(vProxy);
+        const vApiUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${versionAsset.id}`;
+        let vRes = await fetch(vApiUrl, { headers: { Accept: 'application/octet-stream' } });
+        if (!vRes.ok) vRes = await fetch(`https://corsproxy.io/?url=${encodeURIComponent(versionAsset.browser_download_url)}`);
         if (vRes.ok) {
           const vJson = await vRes.json();
           if (vJson.version) requiredVersion = vJson.version;
@@ -622,11 +623,35 @@ async function fetchFirmware() {
     fwState('loading', `Downloading ${asset.name}…`,
       `Release ${tag} · ${(asset.size / 1024).toFixed(1)} KB`);
 
-    // Step 4: download via corsproxy (GitHub release assets redirect to S3
-    // which blocks CORS; the proxy adds the missing header)
-    const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(asset.browser_download_url)}`;
-    const dlRes = await fetch(proxyUrl);
-    if (!dlRes.ok) throw new Error(`Download failed: HTTP ${dlRes.status}`);
+    // Step 4: download the asset via the GitHub API using the asset ID.
+    // For public repos, fetching the API asset URL with Accept:
+    // application/octet-stream redirects to the CDN and works without
+    // a token. We try this first, then fall back to two CORS proxies.
+    const apiAssetUrl = `https://api.github.com/repos/${GITHUB_REPO}/releases/assets/${asset.id}`;
+    let dlRes = null;
+    const attempts = [
+      // Attempt 1: GitHub API asset endpoint (works for public repos, no proxy)
+      () => fetch(apiAssetUrl, {
+        headers: {
+          Accept: 'application/octet-stream',
+          'X-Requested-With': 'XMLHttpRequest',
+        }
+      }),
+      // Attempt 2: corsproxy.io
+      () => fetch(`https://corsproxy.io/?url=${encodeURIComponent(asset.browser_download_url)}`),
+      // Attempt 3: allorigins.win
+      () => fetch(`https://api.allorigins.win/raw?url=${encodeURIComponent(asset.browser_download_url)}`),
+    ];
+
+    let lastErr = '';
+    for (const attempt of attempts) {
+      try {
+        const res = await attempt();
+        if (res.ok) { dlRes = res; break; }
+        lastErr = `HTTP ${res.status}`;
+      } catch(e) { lastErr = e.message; }
+    }
+    if (!dlRes) throw new Error(`All download attempts failed. Last error: ${lastErr}`);
 
     otaImageBytes = new Uint8Array(await dlRes.arrayBuffer());
     const verStr = requiredVersion ? `  v${requiredVersion}` : '';
