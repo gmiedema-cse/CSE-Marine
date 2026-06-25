@@ -580,6 +580,71 @@ document.getElementById('findBtn').addEventListener('click', startAddingCaps);
 document.getElementById('programBtn').addEventListener('click', goAction);
 document.getElementById('quitBtn').addEventListener('click', quitAll);
 
+/* ── Firmware fetch ───────────────────────────────────────────────────── */
+function fwState(state, title, meta) {
+  const card = document.getElementById('fw-card');
+  const icon = document.getElementById('fw-icon');
+  const titleEl = document.getElementById('fw-title');
+  const metaEl  = document.getElementById('fw-meta');
+  const refetch = document.getElementById('fw-refetchBtn');
+  card.className = 'fw-card' + (state ? ' is-' + state : '');
+  icon.textContent = {good:'✅', error:'❌', loading:'⏳'}[state] ?? '📦';
+  titleEl.textContent = title;
+  metaEl.textContent  = meta || '';
+  refetch.style.display = (state === 'error' || state === 'good') ? '' : 'none';
+}
+
+async function fetchFirmware() {
+  fwState('loading', 'Checking firmware...', '');
+  otaImageBytes = null;
+  firmwareReady = false;
+  updateControls();
+  try {
+    const head = await fetch(FIRMWARE_URL, { method: 'HEAD' });
+    if (!head.ok) {
+      fwState('error',
+        head.status === 404 ? 'Firmware file not found' : `Fetch failed (HTTP ${head.status})`,
+        FIRMWARE_URL);
+      return;
+    }
+    const bytes = parseInt(head.headers.get('content-length') || '0');
+    const sizeStr = bytes ? `  (${(bytes / 1024).toFixed(1)} KB)` : '';
+    const filename = FIRMWARE_PATH.split('/').pop();
+    fwState('good',
+      `${filename}  v${REQUIRED_VERSION}${sizeStr}`,
+      'Ready - will download when Go is tapped'
+    );
+    firmwareReady = true;
+    updateControls();
+  } catch(err) {
+    fwState('error', 'Firmware check failed', err.message);
+  }
+}
+
+async function downloadFirmware() {
+  fwState('loading', 'Downloading firmware...', '');
+  try {
+    const res = await fetch(FIRMWARE_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    otaImageBytes = new Uint8Array(await res.arrayBuffer());
+    const filename = FIRMWARE_PATH.split('/').pop();
+    fwState('good',
+      `${filename}  v${REQUIRED_VERSION}  (${(otaImageBytes.length / 1024).toFixed(1)} KB)`,
+      `Downloaded ${new Date().toLocaleTimeString()}`
+    );
+    return true;
+  } catch(err) {
+    fwState('error', 'Download failed', err.message);
+    return false;
+  }
+}
+
+document.getElementById('fw-refetchBtn').addEventListener('click', () => {
+  otaImageBytes = null;
+  firmwareReady = false;
+  fetchFirmware();
+});
+
 /* ── Init ─────────────────────────────────────────────────────────────── */
 document.getElementById('otaToggle').addEventListener('change', function() {
   otaEnabled = this.checked;
