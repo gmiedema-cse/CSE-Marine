@@ -382,20 +382,22 @@ function sendAndWait(cap, bytes, ms) {
   });
 }
 
-/* -- Julian date conversion ---------------------------------------------- */
-// Converts BCD-encoded YY, MM, DD (e.g. 0x26, 0x01, 0x15 = 2026-01-21)
-// to a Julian Day Number (integer days since Jan 1, 4713 BC).
-function bcdToJulian(yy, mm, dd) {
+/* -- Ordinal date conversion --------------------------------------------- */
+// Converts BCD-encoded YY, MM, DD to a compact ordinal date: YYYYY + DDD
+// where YYYY is the 4-digit year and DDD is the day-of-year (1-366).
+// e.g. June 26 2026 -> 26177  (year 2026, day 177)
+function bcdToOrdinal(yy, mm, dd) {
   // Decode BCD: each byte is 0xYZ where Y=tens digit, Z=units digit
   var year  = 2000 + (((yy >> 4) & 0xF) * 10) + (yy & 0xF);
   var month = ((mm >> 4) & 0xF) * 10 + (mm & 0xF);
   var day   = ((dd >> 4) & 0xF) * 10 + (dd & 0xF);
-  // Julian Day Number formula (valid for Gregorian calendar)
-  var a = Math.floor((14 - month) / 12);
-  var y = year + 4800 - a;
-  var m = month + 12 * a - 3;
-  return day + Math.floor((153 * m + 2) / 5) + 365 * y +
-         Math.floor(y / 4) - Math.floor(y / 100) + Math.floor(y / 400) - 32045;
+  // Days in each month (Jan=1..Dec=12), accounting for leap years
+  var isLeap = (year % 4 === 0 && year % 100 !== 0) || (year % 400 === 0);
+  var daysInMonth = [0,31,28+isLeap,31,30,31,30,31,31,30,31,30,31];
+  var dayOfYear = day;
+  for (var m = 1; m < month; m++) dayOfYear += daysInMonth[m];
+  // Format as YYddd where YY is last two digits of year
+  return (year % 100) * 1000 + dayOfYear;
 }
 
 /* -- Version check ------------------------------------------------------- */
@@ -409,7 +411,7 @@ function parseVersionReply(bytes) {
   if (b.length >= 5 && nonPrint) {
     // Binary format: [YY, MM, DD, MAJOR, POINT, CR, LF]
     var yy = b[0], mm = b[1], dd = b[2], major = b[3], point = b[4];
-    var julian = bcdToJulian(yy, mm, dd);
+    var julian = bcdToOrdinal(yy, mm, dd);
     return { version: major + '.' + point, julian: julian };
   }
   var txt = new TextDecoder().decode(b).trim();
@@ -428,7 +430,7 @@ function versionNeedsUpdate(capVer, required) {
 function capFirmwareLabel(cap) {
   if (cap.version === null) return null;  // not checked yet
   var label = 'FW v' + cap.version;
-  if (cap.julian) label += ' (JD ' + cap.julian + ')';
+  if (cap.julian) label += ' (' + cap.julian + ')';
   return label;
 }
 
@@ -570,7 +572,7 @@ function renderCaps() {
     // Build firmware pill
     var fwPill = '';
     if (cap.version !== null) {
-      var fwLabel = 'v' + cap.version + (cap.julian ? ' JD' + cap.julian : '');
+      var fwLabel = 'v' + cap.version + (cap.julian ? ' ' + cap.julian : '');
       fwPill = '<span class="cap-pill ' + (cap.needsUpdate ? 'fw-bad' : 'fw-ok') + '">' + fwLabel + '</span>';
     }
 
