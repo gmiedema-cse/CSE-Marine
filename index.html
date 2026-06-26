@@ -20,22 +20,48 @@
       --r:12px;--rl:20px;
     }
     *,*::before,*::after{box-sizing:border-box}
-    html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--font-b);font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased;min-height:100svh}
-    .app{max-width:640px;margin:0 auto;padding:24px 20px 64px}
+    html,body{
+      margin:0;padding:0;
+      background:var(--bg);color:var(--ink);
+      font-family:var(--font-b);font-size:16px;line-height:1.5;
+      -webkit-font-smoothing:antialiased;
+      min-height:100svh;
+      /* prevent text resize on orientation change */
+      -webkit-text-size-adjust:100%;text-size-adjust:100%;
+    }
+    .app{
+      max-width:600px;
+      margin:0 auto;
+      /* safe-area insets for notch/home-bar phones */
+      padding: 20px max(16px, env(safe-area-inset-left))
+               env(safe-area-inset-bottom, 24px)
+               max(16px, env(safe-area-inset-right));
+      padding-top: max(20px, env(safe-area-inset-top));
+      padding-bottom: max(48px, calc(env(safe-area-inset-bottom) + 24px));
+    }
 
     /* Header */
-    header{text-align:center;margin-bottom:24px}
-    .brand{display:flex;flex-direction:column;align-items:center;gap:8px}
-    .brand-logo{width:auto;max-width:320px;max-height:128px}
-    .brand-text{font-family:var(--font-d);font-weight:500;font-size:32px;letter-spacing:-.02em;color:var(--ink);line-height:1}
+    header{text-align:center;margin-bottom:20px}
+    .brand{display:flex;flex-direction:column;align-items:center;gap:6px}
+    /* Logo scales down gracefully on narrow screens */
+    .brand-logo{width:auto;max-width:min(280px, 80vw);max-height:112px}
+    .brand-text{font-family:var(--font-d);font-weight:500;font-size:clamp(24px,6vw,32px);letter-spacing:-.02em;color:var(--ink);line-height:1}
     .brand-text em{font-style:italic;color:var(--accent)}
 
     /* Sections */
-    section{background:var(--bg-card);border:1px solid var(--line);border-radius:var(--rl);padding:20px 22px;margin-bottom:14px}
-    .section-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:12px}
+    section{background:var(--bg-card);border:1px solid var(--line);border-radius:var(--rl);padding:16px 18px;margin-bottom:12px}
+    .section-label{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-mute);margin-bottom:10px}
 
-    /* Buttons */
-    .btn{font-family:var(--font-b);font-size:15px;font-weight:500;border-radius:var(--r);border:1px solid transparent;cursor:pointer;transition:transform .08s,background .15s,border-color .15s,color .15s;-webkit-tap-highlight-color:transparent;padding:12px 18px}
+    /* Buttons — minimum 44px touch target */
+    .btn{
+      font-family:var(--font-b);font-size:15px;font-weight:500;
+      border-radius:var(--r);border:1px solid transparent;cursor:pointer;
+      transition:transform .08s,background .15s,border-color .15s,color .15s;
+      -webkit-tap-highlight-color:transparent;
+      padding:12px 16px;
+      min-height:44px;
+      touch-action:manipulation;
+    }
     .btn:active:not(:disabled){transform:translateY(1px)}.btn:disabled{opacity:.4;cursor:not-allowed}
     .btn-primary{background:var(--accent);color:var(--bg);border-color:var(--accent)}
     .btn-primary:hover:not(:disabled){background:var(--accent-h);border-color:var(--accent-h)}
@@ -43,93 +69,153 @@
     .btn-ghost:hover:not(:disabled){border-color:var(--ink-soft);color:var(--ink)}
     .btn-warn{background:transparent;color:var(--accent);border-color:var(--accent)}
     .btn-warn:hover:not(:disabled){background:var(--accent-s)}
-    .btn-block{width:100%;padding:14px}.btn-sm{padding:6px 12px;font-size:13px}
+    .btn-block{width:100%;padding:14px}
+    /* Small buttons still hit 44px height via line-height */
+    .btn-sm{padding:8px 12px;font-size:13px;min-height:36px}
 
     /* Banner */
-    .banner{background:var(--accent-s);border:1px solid var(--accent);border-radius:var(--r);padding:13px 16px;margin-bottom:16px;font-size:14px;line-height:1.55}
-    .banner h2{margin:0 0 6px;font-size:13px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.05em}
-    .banner ol{margin:0;padding-left:20px}.banner li+li{margin-top:3px}.banner strong{color:var(--accent)}
+    .banner{background:var(--accent-s);border:1px solid var(--accent);border-radius:var(--r);padding:12px 14px;margin-bottom:14px;font-size:14px;line-height:1.55}
+    .banner h2{margin:0 0 5px;font-size:13px;font-weight:600;color:var(--accent);text-transform:uppercase;letter-spacing:.05em}
+    .banner ol{margin:0;padding-left:18px}.banner li+li{margin-top:3px}.banner strong{color:var(--accent)}
 
     /* Cap list */
-    .cap-list{display:flex;flex-direction:column;gap:8px;margin-top:14px}
+    .cap-list{display:flex;flex-direction:column;gap:8px;margin-top:12px}
     .cap-empty{font-size:14px;color:var(--ink-mute);font-style:italic;padding:6px 0}
 
-    /* Cap row: name | info | blink | remove */
-    .cap-row{display:grid;grid-template-columns:auto 1fr auto auto;align-items:center;gap:10px;padding:12px 14px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);transition:border-color .15s,background .15s}
+    /* Cap row — two-row layout on mobile:
+       Row 1: [checkbox] [name + pills]
+       Row 2 (buttons): [blink] [remove] — right-aligned
+       On wider screens both rows collapse into one grid line. */
+    .cap-row{
+      display:grid;
+      grid-template-columns:24px 1fr;
+      grid-template-rows:auto auto;
+      gap:6px 10px;
+      padding:12px 14px;
+      background:var(--bg);border:1px solid var(--line);
+      border-radius:var(--r);transition:border-color .15s,background .15s;
+    }
     .cap-row.is-selected{border-color:var(--accent);background:var(--accent-s)}
     .cap-row.needs-update{border-color:var(--warn)}
-    .cap-checkbox{appearance:none;width:20px;height:20px;border:1.5px solid var(--line);border-radius:5px;cursor:pointer;position:relative;background:var(--bg-card);transition:all .15s;flex-shrink:0}
-    .cap-checkbox:checked{background:var(--accent);border-color:var(--accent)}
-    .cap-checkbox:checked::after{content:'';position:absolute;left:5px;top:1px;width:6px;height:11px;border:solid var(--bg);border-width:0 2px 2px 0;transform:rotate(45deg)}
 
-    /* Cap info: name + two sub-lines */
-    .cap-info{display:flex;flex-direction:column;gap:3px;min-width:0}
-    .cap-name{font-family:var(--font-m);font-size:13px;font-weight:500;color:var(--ink);word-break:break-all}
-    .cap-meta{display:flex;gap:8px;flex-wrap:wrap}
-    .cap-pill{font-size:11px;font-family:var(--font-m);padding:2px 7px;border-radius:20px;border:1px solid var(--line);color:var(--ink-soft);background:var(--bg-card);white-space:nowrap}
-    .cap-pill.mode{border-color:var(--accent-s);background:var(--accent-s);color:var(--accent);font-weight:600}
-    .cap-pill.fw-ok{border-color:var(--good-s);background:var(--good-s);color:var(--good)}
-    .cap-pill.fw-bad{border-color:var(--warn-s);background:var(--warn-s);color:var(--warn);font-weight:600}
-    .cap-status{font-size:12px;color:var(--ink-mute)}
+    /* Checkbox spans both rows vertically */
+    .cap-checkbox{
+      appearance:none;width:22px;height:22px;
+      border:1.5px solid var(--line);border-radius:6px;cursor:pointer;
+      position:relative;background:var(--bg-card);transition:all .15s;
+      flex-shrink:0;grid-row:1/3;align-self:center;
+      touch-action:manipulation;
+      /* larger tap target */
+      min-height:44px;min-width:44px;
+      margin:-11px 0 -11px -11px;
+      padding:11px;
+      background-clip:content-box;
+    }
+    .cap-checkbox:checked{background-color:var(--accent);border-color:var(--accent)}
+    .cap-checkbox:checked::after{content:'';position:absolute;left:8px;top:4px;width:6px;height:11px;border:solid var(--bg);border-width:0 2px 2px 0;transform:rotate(45deg)}
+
+    /* Info area */
+    .cap-info{display:flex;flex-direction:column;gap:4px;min-width:0;grid-column:2}
+    .cap-name{font-family:var(--font-m);font-size:13px;font-weight:500;color:var(--ink);word-break:break-word;overflow-wrap:anywhere}
+    .cap-meta{display:flex;gap:6px;flex-wrap:wrap}
+    .cap-pill{
+      font-size:11px;font-family:var(--font-m);
+      padding:3px 8px;border-radius:20px;
+      border:1px solid var(--line);color:var(--ink-soft);background:var(--bg-card);
+      white-space:nowrap;line-height:1.4;
+    }
+    .cap-pill.mode{border-color:var(--accent);background:var(--accent-s);color:var(--accent);font-weight:600}
+    .cap-pill.fw-ok{border-color:var(--good);background:var(--good-s);color:var(--good)}
+    .cap-pill.fw-bad{border-color:var(--warn);background:var(--warn-s);color:var(--warn);font-weight:600}
+    .cap-status{font-size:12px;color:var(--ink-mute);line-height:1.3}
     .cap-status[data-tone=good]{color:var(--good)}.cap-status[data-tone=warn]{color:var(--warn)}
     .cap-status[data-tone=danger]{color:var(--danger)}.cap-status[data-tone=update]{color:var(--warn);font-weight:600}
     .cap-status[data-tone=working]{color:var(--accent)}
     .cap-status[data-tone=working]::after{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--accent);margin-left:5px;animation:pulse 1s ease infinite;vertical-align:middle}
     @keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
 
-    /* Blink button — prominent, accent-colored */
-    .btn-blink{padding:8px 14px;font-size:13px;font-weight:600;border-radius:var(--r);background:var(--accent-s);border:1.5px solid var(--accent);color:var(--accent);cursor:pointer;font-family:var(--font-b);transition:all .15s;white-space:nowrap;flex-shrink:0;-webkit-tap-highlight-color:transparent}
+    /* Button row inside cap — second grid row, spans both columns */
+    .cap-btn-row{
+      grid-column:1/3;
+      display:flex;gap:8px;justify-content:flex-end;
+      margin-top:2px;
+    }
+
+    /* Blink button */
+    .btn-blink{
+      padding:8px 16px;font-size:13px;font-weight:600;
+      border-radius:var(--r);background:var(--accent-s);
+      border:1.5px solid var(--accent);color:var(--accent);
+      cursor:pointer;font-family:var(--font-b);transition:all .15s;
+      white-space:nowrap;flex-shrink:0;
+      -webkit-tap-highlight-color:transparent;
+      touch-action:manipulation;min-height:40px;
+    }
     .btn-blink:hover{background:var(--accent);color:var(--bg)}
     .btn-blink:active{transform:scale(.96)}
 
-    .cap-controls{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:13px;color:var(--ink-mute)}
-    .cap-controls a{color:var(--accent);text-decoration:none;cursor:pointer;font-weight:500}
+    .cap-controls{
+      display:flex;justify-content:space-between;align-items:center;
+      margin-top:10px;font-size:13px;color:var(--ink-mute);
+      flex-wrap:wrap;gap:6px;
+    }
+    .cap-controls a{color:var(--accent);text-decoration:none;cursor:pointer;font-weight:500;padding:4px 0;touch-action:manipulation}
     .cap-controls a+a{margin-left:10px}
 
-    /* Mode grid */
-    .mode-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:12px}
-    @media(min-width:480px){.mode-grid{grid-template-columns:repeat(4,1fr)}}
-    .mode-btn{padding:13px 8px;background:transparent;border:1.5px solid var(--line);border-radius:var(--r);cursor:pointer;font-family:var(--font-b);transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:2px;-webkit-tap-highlight-color:transparent}
+    /* Mode grid — always 2x2 on phone, 4-up only when there's room */
+    .mode-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px}
+    @media(min-width:440px){.mode-grid{grid-template-columns:repeat(4,1fr)}}
+    .mode-btn{
+      padding:14px 6px;background:transparent;border:1.5px solid var(--line);
+      border-radius:var(--r);cursor:pointer;font-family:var(--font-b);
+      transition:all .15s;display:flex;flex-direction:column;align-items:center;gap:3px;
+      -webkit-tap-highlight-color:transparent;touch-action:manipulation;
+      min-height:64px;
+    }
     .mode-btn:hover:not(:disabled){border-color:var(--accent);background:var(--accent-s)}
     .mode-btn:disabled{opacity:.4;cursor:not-allowed}
     .mode-btn.is-selected{background:var(--accent);border-color:var(--accent);color:var(--bg)}
-    .mode-btn-name{font-family:var(--font-d);font-weight:500;font-size:18px;letter-spacing:-.01em}
+    .mode-btn-name{font-family:var(--font-d);font-weight:500;font-size:clamp(15px,4vw,18px);letter-spacing:-.01em}
     .mode-btn-psi{font-size:12px;color:var(--ink-mute)}
     .mode-btn.is-selected .mode-btn-psi{color:rgba(245,241,235,.75)}
-    .apply-row{display:grid;grid-template-columns:2fr 1fr;gap:10px;margin-top:12px}
+    /* Go / Quit row stacks on very narrow screens */
+    .apply-row{display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-top:12px}
+    @media(max-width:320px){.apply-row{grid-template-columns:1fr}}
 
-    /* Firmware card */
-    .fw-card{display:flex;align-items:center;gap:12px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:13px 15px;margin-bottom:14px}
+    /* Firmware card — allow title to wrap on small screens */
+    .fw-card{display:flex;align-items:flex-start;gap:10px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:12px 14px;margin-bottom:12px}
     .fw-card.is-good{border-color:var(--good);background:var(--good-s)}
     .fw-card.is-error{border-color:var(--danger);background:var(--danger-s)}
-    .fw-card-icon{font-size:20px;flex-shrink:0;line-height:1}
+    .fw-card-icon{font-size:20px;flex-shrink:0;line-height:1.4}
     .fw-card-body{flex:1;min-width:0}
-    .fw-card-title{font-size:14px;font-weight:600;color:var(--ink);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+    .fw-card-title{font-size:14px;font-weight:600;color:var(--ink);margin-bottom:2px;
+      /* allow wrapping on phones instead of hidden overflow */
+      white-space:normal;overflow-wrap:anywhere;word-break:break-word;}
     .fw-card.is-good .fw-card-title{color:var(--good)}.fw-card.is-error .fw-card-title{color:var(--danger)}
     .fw-card-meta{font-size:12px;color:var(--ink-mute);font-family:var(--font-m)}
 
     /* OTA progress bar */
-    .ota-progress{display:none;margin-top:14px}
+    .ota-progress{display:none;margin-top:12px}
     .ota-progress.is-visible{display:block}
     .ota-bar-wrap{height:8px;border-radius:4px;background:var(--line);overflow:hidden;margin-bottom:6px}
     .ota-bar-fill{height:100%;border-radius:4px;background:var(--accent);width:0%;transition:width .3s ease}
     .ota-bar-fill.ind{width:35%;animation:ind 1.3s ease-in-out infinite}
     @keyframes ind{0%{transform:translateX(-200%)}100%{transform:translateX(400%)}}
-    .ota-bar-label{font-size:12px;color:var(--ink-mute);font-family:var(--font-m)}
+    .ota-bar-label{font-size:12px;color:var(--ink-mute);font-family:var(--font-m);line-height:1.4}
     .ota-bar-label.good{color:var(--good)}.ota-bar-label.error{color:var(--danger)}
 
     /* OTA toggle */
-    .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:14px}
-    .toggle-label{font-size:14px;color:var(--ink-soft);line-height:1.4}
-    .toggle-label strong{color:var(--ink);font-weight:600;display:block;margin-bottom:1px}
-    .toggle-switch{position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0}
+    .toggle-row{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:12px}
+    .toggle-label{font-size:14px;color:var(--ink-soft);line-height:1.4;flex:1;min-width:0}
+    .toggle-label strong{color:var(--ink);font-weight:600;display:block;margin-bottom:2px}
+    .toggle-switch{position:relative;display:inline-flex;align-items:center;cursor:pointer;flex-shrink:0;margin-top:2px;touch-action:manipulation}
     .toggle-switch input{position:absolute;opacity:0;width:0;height:0}
-    .toggle-track{width:44px;height:26px;background:var(--line);border-radius:13px;transition:background .2s;position:relative}
+    .toggle-track{width:48px;height:28px;background:var(--line);border-radius:14px;transition:background .2s;position:relative}
     .toggle-switch input:checked ~ .toggle-track{background:var(--accent)}
-    .toggle-thumb{position:absolute;left:3px;top:3px;width:20px;height:20px;background:#fff;border-radius:50%;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .2s;pointer-events:none}
-    .toggle-switch input:checked ~ .toggle-track .toggle-thumb{transform:translateX(18px)}
+    .toggle-thumb{position:absolute;left:3px;top:3px;width:22px;height:22px;background:#fff;border-radius:50%;box-shadow:0 1px 4px rgba(0,0,0,.25);transition:transform .2s;pointer-events:none}
+    .toggle-switch input:checked ~ .toggle-track .toggle-thumb{transform:translateX(20px)}
 
-    .unsupported{background:var(--accent-s);border:1px solid var(--accent);color:var(--ink);padding:13px 16px;border-radius:var(--r);font-size:14px;margin-bottom:14px;line-height:1.55}
+    .unsupported{background:var(--accent-s);border:1px solid var(--accent);color:var(--ink);padding:12px 14px;border-radius:var(--r);font-size:14px;margin-bottom:12px;line-height:1.55}
     .unsupported strong{display:block;margin-bottom:3px;color:var(--accent)}
   </style>
 </head>
@@ -499,8 +585,10 @@ function renderCaps() {
         metaHtml +
         '<span class="cap-status"></span>' +
       '</div>' +
-      '<button class="btn-blink" data-id="' + cap.id + '">&#128267; Blink</button>' +
-      '<button class="btn btn-ghost btn-sm" data-remove="' + cap.id + '">Remove</button>';
+      '<div class="cap-btn-row">' +
+        '<button class="btn-blink" data-id="' + cap.id + '">&#128267;&nbsp;Blink</button>' +
+        '<button class="btn btn-ghost btn-sm" data-remove="' + cap.id + '">Remove</button>' +
+      '</div>';
 
     row.querySelector('.cap-name').textContent = cap.name;
     var s = row.querySelector('.cap-status');
